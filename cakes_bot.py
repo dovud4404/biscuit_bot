@@ -3,22 +3,28 @@ import os
 import re
 from telegram import Update, ReplyKeyboardRemove
 from telegram.constants import ParseMode
+import logging
+import os
+import re
+import html
+from telegram import Update, ReplyKeyboardRemove
 from telegram.helpers import escape_markdown
 from telegram.ext import (
-    Application,
-    CommandHandler,
-    ContextTypes,
-    ConversationHandler,
-    MessageHandler,
-    filters,
-)
+     Application,
+     CommandHandler,
+     ContextTypes,
+     ConversationHandler,
+     MessageHandler,
+     filters,
+ )
+
 
 NAME, PHONE, COMMENT = range(3)
 
 GROUP_CHAT_ID = -1002697862181
 BOT_TOKEN = "8170717877:AAEYlKs6kSheuLRbOlBQ-z4uwdagaR_M2Yk"
 
-PHONE_RE = re.compile(r"^\+?\d[\d\s\-\(\)]{7,}$") 
+PHONE_RE = re.compile(r"^\+?\d[\d\s\-\(\)]{7,}$")
 
 logging.basicConfig(
     level=logging.INFO,
@@ -54,32 +60,38 @@ async def ask_comment(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
 
 
 async def finish(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    context.user_data["comment"] = update.message.text.strip()
     d = context.user_data
+    d["comment"] = update.message.text.strip()
+
+    # Экранируем ввод пользователя для HTML
+    name    = html.escape(d["name"])
+    phone   = html.escape(d["phone"])
+    comment = html.escape(d["comment"])
 
     order_text = (
-        "🎂 *Новый заказ торта!*\n\n"
-        f"*Имя:* {escape_markdown(d['name'], version=2)}\n"
-        f"*Телефон:* {escape_markdown(d['phone'], version=2)}\n"
-        f"*Комментарий:* {escape_markdown(d['comment'], version=2)}"
+        "🎂 <b>Новый заказ торта!</b>\n\n"
+        f"<b>Имя:</b> {name}\n"
+        f"<b>Телефон:</b> {phone}\n"
+        f"<b>Комментарий:</b> {comment}"
     )
 
     try:
         await context.bot.send_message(
             chat_id=GROUP_CHAT_ID,
             text=order_text,
-            parse_mode=ParseMode.MARKDOWN_V2,
+            parse_mode=ParseMode.HTML,
         )
         await update.message.reply_text(
             "Спасибо! 🎉 Ваш заказ отправлен администратору. Мы свяжемся с вами в ближайшее время."
         )
-    except Exception as e:
-        logging.exception("Не удалось отправить сообщение в канал: %s", e)
+    except Exception:
+        logging.exception("Не удалось отправить сообщение в канал")
         await update.message.reply_text(
             "Упс! Не получилось отправить заказ. Попробуйте ещё раз позже."
         )
 
     return ConversationHandler.END
+
 
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
