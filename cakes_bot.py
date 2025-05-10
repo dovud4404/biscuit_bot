@@ -6,7 +6,6 @@ import html
 
 from telegram import Update, ReplyKeyboardRemove
 from telegram.constants import ParseMode
-from telegram.helpers import escape_markdown
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -20,9 +19,11 @@ from telegram.ext import (
 NAME, PHONE, COMMENT = range(3)
 
 # ─── Configuration from env vars ───────────────────────────────────────────────
-BOT_TOKEN      = os.environ["BOT_TOKEN"]
-GROUP_CHAT_ID  = int(os.environ["GROUP_CHAT_ID"])
-PHONE_PATTERN  = re.compile(r"^\+?\d[\d\s\-\(\)]{7,}$")
+BOT_TOKEN       = os.environ["BOT_TOKEN"]
+GROUP_CHAT_ID   = int(os.environ["GROUP_CHAT_ID"])
+EXTERNAL_URL    = os.environ["RENDER_EXTERNAL_URL"]  # e.g. "https://biscuit-bot.onrender.com"
+PORT            = int(os.environ.get("PORT", "8443"))
+PHONE_PATTERN   = re.compile(r"^\+?\d[\d\s\-\(\)]{7,}$")
 
 # ─── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -60,7 +61,7 @@ async def finish(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     data = context.user_data
     data["comment"] = update.message.text.strip()
 
-    # Экранируем только ввод пользователя
+    # Экранируем пользовательский ввод
     name    = html.escape(data["name"])
     phone   = html.escape(data["phone"])
     comment = html.escape(data["comment"])
@@ -98,13 +99,13 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     logging.error("Ошибка обработки обновления:", exc_info=context.error)
 
-
 # ─── Main ──────────────────────────────────────────────────────────────────────
 def main() -> None:
-    # Команда build-hook от Render автоматически подставит переменную RENDER_EXTERNAL_HOSTNAME
-    external_host = os.environ.get("RENDER_EXTERNAL_HOSTNAME")
-    port          = int(os.environ.get("PORT", "8443"))
+    # Собираем полный HTTPS-URL вебхука
+    webhook_url = f"{EXTERNAL_URL.rstrip('/')}/{BOT_TOKEN}"
+    logging.info("Устанавливаем вебхук: %s", webhook_url)
 
+    # Создаём приложение и регистрируем хэндлеры
     app = Application.builder().token(BOT_TOKEN).build()
 
     conv = ConversationHandler(
@@ -119,22 +120,15 @@ def main() -> None:
     app.add_handler(conv)
     app.add_error_handler(error_handler)
 
-    # Регистрируем webhook в Telegram
-    webhook_url = f"https://{external_host}/{BOT_TOKEN}"
+    # Устанавливаем вебхук в Telegram
     app.bot.set_webhook(webhook_url)
-    logging.info("Webhook установлен: %s", webhook_url)
 
-    # Запускаем HTTP-сервер для приёма вебхуков
+    # Запускаем HTTP-сервер для приёма вебхуков от Telegram
     app.run_webhook(
         listen="0.0.0.0",
-        port=port,
+        port=PORT,
         url_path=BOT_TOKEN,
     )
-
-
-if __name__ == "__main__":
-    main()
-
 
 if __name__ == "__main__":
     main()
