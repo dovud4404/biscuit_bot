@@ -15,25 +15,21 @@ from telegram.ext import (
     filters,
 )
 
-# ─── Conversation states ───────────────────────────────────────────────────────
+# ────────────── CONFIG ──────────────
+BOT_TOKEN       = os.environ["BOT_TOKEN"]
+GROUP_CHAT_ID   = int(os.environ["GROUP_CHAT_ID"])
+EXTERNAL_URL    = os.environ["RENDER_EXTERNAL_URL"].rstrip("/")  # https://*.onrender.com
+PORT            = int(os.environ.get("PORT", "8443"))
+
+PHONE_RE = re.compile(r"^\+?\d[\d\s\-\(\)]{7,}$")
 NAME, PHONE, COMMENT = range(3)
 
-# ─── Конфигурация из окружения ───────────────────────────────────────────────────
-BOT_TOKEN     = os.environ["BOT_TOKEN"]
-GROUP_CHAT_ID = int(os.environ["GROUP_CHAT_ID"])
-EXTERNAL_URL  = os.environ["RENDER_EXTERNAL_URL"].rstrip("/")  # https://<ваш-сервис>.onrender.com
-PORT          = int(os.environ.get("PORT", "8443"))
-
-# Простая валидация телефона
-PHONE_RE = re.compile(r"^\+?\d[\d\s\-\(\)]{7,}$")
-
-# ─── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 
-# ─── Handlers ──────────────────────────────────────────────────────────────────
+# ────────────── HANDLERS ──────────────
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     await update.message.reply_text(
         "🍰 Добро пожаловать! Я приму ваш заказ на торт.\n"
@@ -52,7 +48,6 @@ async def ask_comment(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     if not PHONE_RE.fullmatch(phone):
         await update.message.reply_text("❗ Телефон некорректен. Попробуйте ещё раз:")
         return PHONE
-
     context.user_data["phone"] = phone
     await update.message.reply_text(
         "💬 Добавьте комментарий (вкус, вес, дата) или «-», если без комментариев:"
@@ -60,19 +55,14 @@ async def ask_comment(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     return COMMENT
 
 async def finish(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    data = context.user_data
-    data["comment"] = update.message.text.strip()
-
-    # Экранируем только пользовательский ввод
-    name    = html.escape(data["name"])
-    phone   = html.escape(data["phone"])
-    comment = html.escape(data["comment"])
+    d = context.user_data
+    d["comment"] = update.message.text.strip()
 
     order_text = (
         "🎂 <b>Новый заказ торта!</b>\n\n"
-        f"<b>Имя:</b> {name}\n"
-        f"<b>Телефон:</b> {phone}\n"
-        f"<b>Комментарий:</b> {comment}"
+        f"<b>Имя:</b> {html.escape(d['name'])}\n"
+        f"<b>Телефон:</b> {html.escape(d['phone'])}\n"
+        f"<b>Комментарий:</b> {html.escape(d['comment'])}"
     )
 
     try:
@@ -89,25 +79,17 @@ async def finish(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         await update.message.reply_text(
             "Упс! Что-то пошло не так. Попробуйте позже."
         )
-
     return ConversationHandler.END
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    await update.message.reply_text(
-        "Заказ отменён. Чтобы начать сначала, отправьте /start."
-    )
+    await update.message.reply_text("Заказ отменён. Чтобы начать заново, отправьте /start.")
     return ConversationHandler.END
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-    logging.error("Ошибка при обработке обновления:", exc_info=context.error)
+    logging.error("Ошибка в обработке обновления:", exc_info=context.error)
 
-# ─── Main ──────────────────────────────────────────────────────────────────────
+# ────────────── MAIN ──────────────
 def main() -> None:
-    # Собираем URL для webhook
-    webhook_url = f"{EXTERNAL_URL}/{BOT_TOKEN}"
-    logging.info("Устанавливаем webhook: %s", webhook_url)
-
-    # Создаём приложение и регистрируем хэндлеры
     app = Application.builder().token(BOT_TOKEN).build()
 
     conv = ConversationHandler(
@@ -122,14 +104,15 @@ def main() -> None:
     app.add_handler(conv)
     app.add_error_handler(error_handler)
 
-    # Регистрируем webhook у Telegram
-    app.bot.set_webhook(webhook_url)
+    webhook_url = f"{EXTERNAL_URL}/{BOT_TOKEN}"
+    logging.info("Webhook URL → %s", webhook_url)
 
-    # Запускаем встроенный HTTP-сервер для приёма вебхуков
+    # ⬇️ запускаем HTTP-сервер и одновременно регистрируем вебхук
     app.run_webhook(
         listen="0.0.0.0",
         port=PORT,
         url_path=BOT_TOKEN,
+        webhook_url=webhook_url,   # PTB сам вызовет setWebhook внутри
     )
 
 if __name__ == "__main__":
