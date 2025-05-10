@@ -1,36 +1,36 @@
-import logging
-import os
-import re
-from telegram import Update, ReplyKeyboardRemove
-from telegram.constants import ParseMode 
+#!/usr/bin/env python3
 import logging
 import os
 import re
 import html
+
 from telegram import Update, ReplyKeyboardRemove
+from telegram.constants import ParseMode
 from telegram.helpers import escape_markdown
 from telegram.ext import (
-     Application,
-     CommandHandler,
-     ContextTypes,
-     ConversationHandler,
-     MessageHandler,
-     filters,
- )
+    Application,
+    CommandHandler,
+    ContextTypes,
+    ConversationHandler,
+    MessageHandler,
+    filters,
+)
 
-
+# ─── Conversation states ───────────────────────────────────────────────────────
 NAME, PHONE, COMMENT = range(3)
 
-GROUP_CHAT_ID = -1002697862181
-BOT_TOKEN = "8170717877:AAGYraF7snSViOc2GWYXYQrX_XlpDzJxl9E"
+# ─── Configuration from env vars ───────────────────────────────────────────────
+BOT_TOKEN      = os.environ["BOT_TOKEN"]
+GROUP_CHAT_ID  = int(os.environ["GROUP_CHAT_ID"])
+PHONE_PATTERN  = re.compile(r"^\+?\d[\d\s\-\(\)]{7,}$")
 
-PHONE_RE = re.compile(r"^\+?\d[\d\s\-\(\)]{7,}$")
-
+# ─── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 
+# ─── Handlers ──────────────────────────────────────────────────────────────────
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     await update.message.reply_text(
         "🍰 Добро пожаловать! Я приму ваш заказ на торт.\n"
@@ -39,34 +39,31 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     )
     return NAME
 
-
 async def ask_phone(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data["name"] = update.message.text.strip()
-    await update.message.reply_text("📞 Укажите номер телефона (например, +992 900‑000‑000):")
+    await update.message.reply_text("📞 Укажите номер телефона (например, +992 900-000-000):")
     return PHONE
-
 
 async def ask_comment(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     phone = update.message.text.strip()
-    if not PHONE_RE.fullmatch(phone):
-        await update.message.reply_text("❗ Телефон выглядит некорректно. Попробуйте ещё раз:")
+    if not PHONE_PATTERN.fullmatch(phone):
+        await update.message.reply_text("❗ Телефон некорректен. Попробуйте ещё раз:")
         return PHONE
 
     context.user_data["phone"] = phone
     await update.message.reply_text(
-        "💬 Добавьте комментарий (вкус, вес, дата) или напишите «-», если без комментариев:"
+        "💬 Добавьте комментарий (вкус, вес, дата) или «-», если без комментариев:"
     )
     return COMMENT
 
-
 async def finish(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    d = context.user_data
-    d["comment"] = update.message.text.strip()
+    data = context.user_data
+    data["comment"] = update.message.text.strip()
 
-    # Экранируем ввод пользователя для HTML
-    name    = html.escape(d["name"])
-    phone   = html.escape(d["phone"])
-    comment = html.escape(d["comment"])
+    # Экранируем только ввод пользователя
+    name    = html.escape(data["name"])
+    phone   = html.escape(data["phone"])
+    comment = html.escape(data["comment"])
 
     order_text = (
         "🎂 <b>Новый заказ торта!</b>\n\n"
@@ -87,44 +84,56 @@ async def finish(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     except Exception:
         logging.exception("Не удалось отправить сообщение в канал")
         await update.message.reply_text(
-            "Упс! Не получилось отправить заказ. Попробуйте ещё раз позже."
+            "Упс! Что-то пошло не так. Попробуйте позже."
         )
 
     return ConversationHandler.END
 
-
-
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    await update.message.reply_text("Заказ отменён. Чтобы начать заново, отправьте /start.")
+    await update.message.reply_text(
+        "Заказ отменён. Чтобы начать сначала, отправьте /start."
+    )
     return ConversationHandler.END
 
-
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-    logging.error("Exception while handling an update:", exc_info=context.error)
+    logging.error("Ошибка обработки обновления:", exc_info=context.error)
 
 
-
+# ─── Main ──────────────────────────────────────────────────────────────────────
 def main() -> None:
-    if not (BOT_TOKEN and GROUP_CHAT_ID):
-        raise RuntimeError("BOT_TOKEN или GROUP_CHAT_ID не заданы в переменных окружения")
+    # Команда build-hook от Render автоматически подставит переменную RENDER_EXTERNAL_HOSTNAME
+    external_host = os.environ.get("RENDER_EXTERNAL_HOSTNAME")
+    port          = int(os.environ.get("PORT", "8443"))
 
     app = Application.builder().token(BOT_TOKEN).build()
 
     conv = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
         states={
-            NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_phone)],
-            PHONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_comment)],
+            NAME:    [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_phone)],
+            PHONE:   [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_comment)],
             COMMENT: [MessageHandler(filters.TEXT & ~filters.COMMAND, finish)],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
     )
-
     app.add_handler(conv)
     app.add_error_handler(error_handler)
 
-    logging.info("Bot started…")
-    app.run_polling()
+    # Регистрируем webhook в Telegram
+    webhook_url = f"https://{external_host}/{BOT_TOKEN}"
+    app.bot.set_webhook(webhook_url)
+    logging.info("Webhook установлен: %s", webhook_url)
+
+    # Запускаем HTTP-сервер для приёма вебхуков
+    app.run_webhook(
+        listen="0.0.0.0",
+        port=port,
+        url_path=BOT_TOKEN,
+    )
+
+
+if __name__ == "__main__":
+    main()
 
 
 if __name__ == "__main__":
