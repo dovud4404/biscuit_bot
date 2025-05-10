@@ -18,12 +18,14 @@ from telegram.ext import (
 # ─── Conversation states ───────────────────────────────────────────────────────
 NAME, PHONE, COMMENT = range(3)
 
-# ─── Configuration from env vars ───────────────────────────────────────────────
-BOT_TOKEN       = os.environ["BOT_TOKEN"]
-GROUP_CHAT_ID   = int(os.environ["GROUP_CHAT_ID"])
-EXTERNAL_URL    = os.environ["RENDER_EXTERNAL_URL"]  # e.g. "https://biscuit-bot.onrender.com"
-PORT            = int(os.environ.get("PORT", "8443"))
-PHONE_PATTERN   = re.compile(r"^\+?\d[\d\s\-\(\)]{7,}$")
+# ─── Конфигурация из окружения ───────────────────────────────────────────────────
+BOT_TOKEN     = os.environ["BOT_TOKEN"]
+GROUP_CHAT_ID = int(os.environ["GROUP_CHAT_ID"])
+EXTERNAL_URL  = os.environ["RENDER_EXTERNAL_URL"].rstrip("/")  # https://<ваш-сервис>.onrender.com
+PORT          = int(os.environ.get("PORT", "8443"))
+
+# Простая валидация телефона
+PHONE_RE = re.compile(r"^\+?\d[\d\s\-\(\)]{7,}$")
 
 # ─── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -47,7 +49,7 @@ async def ask_phone(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
 async def ask_comment(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     phone = update.message.text.strip()
-    if not PHONE_PATTERN.fullmatch(phone):
+    if not PHONE_RE.fullmatch(phone):
         await update.message.reply_text("❗ Телефон некорректен. Попробуйте ещё раз:")
         return PHONE
 
@@ -61,7 +63,7 @@ async def finish(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     data = context.user_data
     data["comment"] = update.message.text.strip()
 
-    # Экранируем пользовательский ввод
+    # Экранируем только пользовательский ввод
     name    = html.escape(data["name"])
     phone   = html.escape(data["phone"])
     comment = html.escape(data["comment"])
@@ -97,13 +99,13 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     return ConversationHandler.END
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-    logging.error("Ошибка обработки обновления:", exc_info=context.error)
+    logging.error("Ошибка при обработке обновления:", exc_info=context.error)
 
 # ─── Main ──────────────────────────────────────────────────────────────────────
 def main() -> None:
-    # Собираем полный HTTPS-URL вебхука
-    webhook_url = f"{EXTERNAL_URL.rstrip('/')}/{BOT_TOKEN}"
-    logging.info("Устанавливаем вебхук: %s", webhook_url)
+    # Собираем URL для webhook
+    webhook_url = f"{EXTERNAL_URL}/{BOT_TOKEN}"
+    logging.info("Устанавливаем webhook: %s", webhook_url)
 
     # Создаём приложение и регистрируем хэндлеры
     app = Application.builder().token(BOT_TOKEN).build()
@@ -120,10 +122,10 @@ def main() -> None:
     app.add_handler(conv)
     app.add_error_handler(error_handler)
 
-    # Устанавливаем вебхук в Telegram
+    # Регистрируем webhook у Telegram
     app.bot.set_webhook(webhook_url)
 
-    # Запускаем HTTP-сервер для приёма вебхуков от Telegram
+    # Запускаем встроенный HTTP-сервер для приёма вебхуков
     app.run_webhook(
         listen="0.0.0.0",
         port=PORT,
