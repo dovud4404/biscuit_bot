@@ -22,7 +22,7 @@ from telegram.ext import (
 NAME, PHONE, COMMENT = range(3)
 
 GROUP_CHAT_ID = -1002697862181
-BOT_TOKEN = "8170717877:AAEYlKs6kSheuLRbOlBQ-z4uwdagaR_M2Yk"
+BOT_TOKEN = "8170717877:AAGYraF7snSViOc2GWYXYQrX_XlpDzJxl9E"
 
 PHONE_RE = re.compile(r"^\+?\d[\d\s\-\(\)]{7,}$")
 
